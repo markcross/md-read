@@ -1,0 +1,1326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Markdown Reader</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #161b22;
+    --border: #21262d;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --accent: #58a6ff;
+    --accent2: #3fb950;
+    --heading: #f0f6fc;
+    --code-bg: #161b22;
+    --blockquote: #1f2937;
+    --link: #58a6ff;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    --font-body: 'Charter', 'Georgia', 'Cambria', serif;
+    --font-ui: 'IBM Plex Sans', system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.75;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Top bar ── */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(15,17,23,0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    font-family: var(--font-ui);
+  }
+
+  .logo {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .logo span { color: var(--accent); }
+
+  #drop-zone {
+    flex: 1;
+    min-width: 80px;
+    border: 1.5px dashed var(--border);
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color .2s, color .2s, background .2s;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #drop-zone:hover, #drop-zone.drag-over {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(88,166,255,.05);
+  }
+  #drop-zone.has-file {
+    border-color: var(--accent2);
+    color: var(--accent2);
+  }
+
+  #file-input { display: none; }
+
+  .toolbar-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: color .15s, border-color .15s, background .15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .toolbar-btn:hover { color: var(--text); border-color: var(--muted); background: #1c2128; }
+  .toolbar-btn.active { color: var(--accent); border-color: var(--accent); background: rgba(88,166,255,.08); }
+
+  /* ── Layout ── */
+  main {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* ── TOC sidebar ── */
+  #toc-panel {
+    width: 240px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    padding: 24px 0;
+    overflow-y: auto;
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    display: none;
+  }
+  #toc-panel.visible { display: block; }
+
+  .toc-title {
+    padding: 0 16px 10px;
+    font-size: 10px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  #toc-list { list-style: none; }
+  #toc-list li a {
+    display: block;
+    padding: 4px 16px;
+    color: var(--muted);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    transition: color .15s, border-color .15s;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #toc-list li a:hover { color: var(--text); }
+  #toc-list li a.active { color: var(--accent); border-left-color: var(--accent); }
+  #toc-list li.h3 a { padding-left: 28px; }
+  #toc-list li.h4 a { padding-left: 40px; }
+
+  /* ── Content area ── */
+  #content-wrap {
+    flex: 1;
+    overflow-y: scroll;
+    display: flex;
+    justify-content: center;
+    padding: 48px 24px 80px;
+    scrollbar-width: none;
+  }
+  #content-wrap::-webkit-scrollbar { display: none; }
+  #content-wrap::-webkit-scrollbar { display: none; }
+
+  article {
+    width: 100%;
+    max-width: 720px;
+    padding: 0 48px;
+    transition: max-width .15s ease, padding .15s ease;
+  }
+
+  /* ── Landing state ── */
+  #landing {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    gap: 16px;
+    text-align: center;
+    color: var(--muted);
+    font-family: var(--font-ui);
+  }
+  #landing svg { opacity: .25; }
+  #landing p { font-size: 14px; line-height: 1.5; max-width: 300px; }
+  #landing kbd {
+    display: inline-block;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+  }
+
+  /* ── Markdown typography ── */
+  #md-output { display: none; }
+  #md-output.visible { display: block; }
+
+  #md-output h1, #md-output h2, #md-output h3, #md-output h4 {
+    font-family: var(--font-ui);
+    font-weight: 700;
+    color: var(--heading);
+    line-height: 1.25;
+    margin-top: 2em;
+    margin-bottom: .6em;
+  }
+  #md-output h1 { font-size: 2em; margin-top: 0; border-bottom: 1px solid var(--border); padding-bottom: .4em; }
+  #md-output h2 { font-size: 1.4em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+  #md-output h3 { font-size: 1.15em; }
+  #md-output h4 { font-size: 1em; color: var(--muted); }
+
+  #md-output p { margin-bottom: 1.1em; }
+
+  #md-output a { color: var(--link); text-decoration: none; }
+  #md-output a:hover { text-decoration: underline; }
+
+  #md-output ul, #md-output ol {
+    margin: 0 0 1em 1.5em;
+  }
+  #md-output li { margin-bottom: .3em; }
+
+  #md-output blockquote {
+    margin: 1.2em 0;
+    padding: 12px 16px;
+    border-left: 3px solid var(--accent);
+    background: var(--blockquote);
+    border-radius: 0 6px 6px 0;
+    color: var(--muted);
+    font-style: italic;
+  }
+  #md-output blockquote p { margin: 0; }
+
+  #md-output code {
+    font-family: var(--font-mono);
+    font-size: .85em;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 5px;
+    color: #e06c75;
+  }
+
+  #md-output pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    overflow-x: auto;
+    margin: 1.2em 0;
+    font-size: .82em;
+    line-height: 1.6;
+  }
+  #md-output pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+  }
+
+  #md-output table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.2em 0;
+    font-family: var(--font-ui);
+    font-size: .9em;
+  }
+  #md-output th {
+    background: var(--surface);
+    color: var(--heading);
+    font-weight: 600;
+    text-align: left;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+  }
+  #md-output td {
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+  }
+  #md-output tr:nth-child(even) td { background: rgba(255,255,255,.02); }
+
+  #md-output hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2em 0;
+  }
+
+  #md-output img {
+    max-width: 100%;
+    border-radius: 6px;
+    margin: .5em 0;
+  }
+
+  /* Checkbox lists */
+  #md-output li input[type=checkbox] {
+    margin-right: 6px;
+    accent-color: var(--accent);
+  }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── Filename pill ── */
+  #filename {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 8px;
+    display: none;
+    white-space: nowrap;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+  #filename.visible { display: block; }
+
+  /* ── Document Map ── */
+  #doc-map {
+    width: 160px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    background: #0a0d12;
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+    user-select: none;
+  }
+  #doc-map-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    image-rendering: pixelated;
+    opacity: 0.75;
+    pointer-events: none;
+  }
+  #doc-map-viewport {
+    position: absolute;
+    left: 0;
+    right: 0;
+    background: rgba(88,166,255,0.13);
+    border-top: 1px solid rgba(88,166,255,0.55);
+    border-bottom: 1px solid rgba(88,166,255,0.55);
+    pointer-events: none;
+  }
+  #doc-map-label {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 4px 0 5px;
+    font-family: var(--font-ui);
+    font-size: 9px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: center;
+    background: linear-gradient(transparent, rgba(10,13,18,.9));
+    pointer-events: none;
+  }
+
+  /* ── Chrome localStorage warning banner ── */
+  #chrome-warn {
+    display: none;
+    background: #2d1f00;
+    border-bottom: 1px solid #7d5a00;
+    padding: 9px 20px;
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    color: #ffd970;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  #chrome-warn.visible { display: flex; }
+  #chrome-warn strong { color: #ffe599; }
+  #chrome-warn code {
+    background: rgba(0,0,0,.35);
+    border: 1px solid rgba(255,220,80,.2);
+    border-radius: 4px;
+    padding: 1px 7px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: #ffe599;
+    user-select: all;
+  }
+  #chrome-warn-close {
+    margin-left: auto;
+    background: none;
+    border: 1px solid rgba(255,200,50,.3);
+    color: #ffd970;
+    border-radius: 4px;
+    padding: 2px 9px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: var(--font-ui);
+    flex-shrink: 0;
+  }
+  #chrome-warn-close:hover { background: rgba(255,200,50,.1); }
+
+  /* ── Colour pickers ── */
+  .color-pair {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+  .color-swatch {
+    width: 26px;
+    height: 26px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+    transition: border-color .15s;
+  }
+  .color-swatch:hover { border-color: var(--muted); }
+  .color-swatch input[type=color] {
+    position: absolute;
+    inset: -4px;
+    width: calc(100% + 8px);
+    height: calc(100% + 8px);
+    opacity: 0;
+    cursor: pointer;
+    border: none;
+    padding: 0;
+  }
+  .color-swatch-preview {
+    position: absolute;
+    inset: 2px;
+    border-radius: 2px;
+    pointer-events: none;
+  }
+  .color-label {
+    font-family: var(--font-ui);
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    line-height: 1;
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+  }
+  .flip-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+    width: 26px;
+    height: 26px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color .15s, border-color .15s;
+    flex-shrink: 0;
+  }
+  .flip-btn:hover { color: var(--text); border-color: var(--muted); }
+
+  /* ── Font dropdown ── */
+  #font-select {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    padding: 5px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+    flex-shrink: 0;
+    max-width: 130px;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237d8590' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 7px center;
+    padding-right: 24px;
+  }
+  #font-select:hover, #font-select:focus { color: var(--text); border-color: var(--muted); outline: none; }
+  #font-select option { background: #161b22; color: #e6edf3; }
+
+  /* ── Recent files dropdown ── */
+  .logo {
+    position: relative;
+    cursor: pointer;
+  }
+  #recent-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    min-width: 260px;
+    max-width: 420px;
+    background: #1c2128;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    z-index: 500;
+    overflow: hidden;
+    font-family: var(--font-ui);
+  }
+  #recent-dropdown.open { display: block; }
+  .recent-header {
+    padding: 8px 12px 6px;
+    font-size: 10px;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .recent-item {
+    display: block;
+    padding: 8px 12px;
+    font-size: 12.5px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    transition: background .12s;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+  }
+  .recent-item:hover { background: rgba(88,166,255,.1); color: var(--accent); }
+  .recent-empty {
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--muted);
+    font-style: italic;
+  }
+  .recent-clear {
+    display: block;
+    width: 100%;
+    padding: 7px 12px;
+    font-size: 11px;
+    color: var(--muted);
+    background: none;
+    border: none;
+    border-top: 1px solid var(--border);
+    text-align: left;
+    cursor: pointer;
+    font-family: var(--font-ui);
+    transition: color .12s;
+  }
+  .recent-clear:hover { color: #f85149; }
+
+  /* ── Reading timer ── */
+  #reading-timer {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 10px;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+    transition: color .15s, border-color .15s;
+    letter-spacing: .04em;
+    white-space: nowrap;
+  }
+  #reading-timer:hover { color: var(--text); border-color: var(--muted); }
+  #reading-timer.paused { color: #f0a030; border-color: #f0a030; }
+  #reading-timer.paused::after { content: ' ⏸'; font-size: 10px; }
+
+  /* ── Clipboard toast ── */
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(12px);
+    background: #1c2128;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    padding: 8px 18px;
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s, transform .2s;
+    z-index: 9999;
+    white-space: nowrap;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<div id="toast"></div>
+<div id="chrome-warn">
+  <span>⚠ <strong>Chrome + local file:</strong> localStorage is blocked by default.
+  Close all Chrome windows, then relaunch with</span>
+  <code>google-chrome --allow-file-access-from-files</code>
+  <span>— or use <strong>Firefox</strong> where this works out of the box.</span>
+  <button id="chrome-warn-close">Dismiss</button>
+</div>
+<header>
+  <div class="logo" id="logo-btn" title="Recent files">md<span>·</span>read
+    <div id="recent-dropdown">
+      <div class="recent-header">Recent files</div>
+      <div id="recent-list"></div>
+      <button class="recent-clear" id="recent-clear">Clear history</button>
+    </div>
+  </div>
+
+  <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+    Drop a <strong>.md</strong> file here, or click to open
+  </div>
+  <input type="file" id="file-input" accept=".md,.markdown,.txt">
+
+  <span id="filename"></span>
+  <button class="toolbar-btn" id="toc-toggle" title="Toggle table of contents">TOC</button>
+  <button class="toolbar-btn" id="paste-btn" title="Paste markdown from clipboard">Paste</button>
+  <button class="toolbar-btn" id="pgup-btn" title="Page Up (PgUp)">↑</button>
+  <button class="toolbar-btn" id="pgdn-btn" title="Page Down (PgDn)">↓</button>
+  <button class="toolbar-btn" id="font-down-btn" title="Decrease font size (Ctrl+-)">A−</button>
+  <button class="toolbar-btn" id="font-up-btn" title="Increase font size (Ctrl+=)">A+</button>
+  <button class="toolbar-btn" id="width-down-btn" title="Narrow text (←)">←</button>
+  <button class="toolbar-btn" id="width-up-btn" title="Widen text (→)">→</button>
+
+  <select id="font-select" title="Body font">
+    <option value="serif-charter"   >Charter</option>
+    <option value="serif-georgia"   >Georgia</option>
+    <option value="serif-palatino"  >Palatino</option>
+    <option value="sans-ibmplex"    >IBM Plex Sans</option>
+    <option value="sans-inter"      >Inter</option>
+    <option value="sans-system"     >System UI</option>
+    <option value="mono-jetbrains"  >JetBrains Mono</option>
+    <option value="mono-firacode"   >Fira Code</option>
+    <option value="mono-courier"    >Courier New</option>
+  </select>
+
+  <div class="color-pair" title="Background colour">
+    <div class="color-swatch" id="bg-swatch">
+      <div class="color-swatch-preview" id="bg-preview"></div>
+      <input type="color" id="bg-picker" value="#0f1117">
+    </div>
+    <div class="color-label">BG</div>
+  </div>
+  <button class="flip-btn" id="flip-colors" title="Flip foreground and background">⇅</button>
+  <div class="color-pair" title="Text colour">
+    <div class="color-swatch" id="fg-swatch">
+      <div class="color-swatch-preview" id="fg-preview"></div>
+      <input type="color" id="fg-picker" value="#e6edf3">
+    </div>
+    <div class="color-label">FG</div>
+  </div>
+  <div id="reading-timer" title="Reading time · click to pause · double-click to reset">00:00:00</div>
+</header>
+
+<main>
+  <nav id="toc-panel">
+    <div class="toc-title">Contents</div>
+    <ul id="toc-list"></ul>
+  </nav>
+
+  <div id="content-wrap">
+    <article>
+      <div id="landing">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+          <polyline points="10 9 9 9 8 9"/>
+        </svg>
+        <p>Open a Markdown file, drag it onto the bar above, or <kbd>Paste</kbd> raw text.</p>
+      </div>
+      <div id="md-output"></div>
+    </article>
+  </div>
+  <div id="doc-map">
+    <canvas id="doc-map-canvas"></canvas>
+    <div id="doc-map-viewport"></div>
+    <div id="doc-map-label">Document Map</div>
+  </div>
+</main>
+
+<script>
+  const fileInput   = document.getElementById('file-input');
+  const dropZone    = document.getElementById('drop-zone');
+  const mdOutput    = document.getElementById('md-output');
+  const landing     = document.getElementById('landing');
+  const tocPanel    = document.getElementById('toc-panel');
+  const tocList     = document.getElementById('toc-list');
+  const tocToggle   = document.getElementById('toc-toggle');
+  const pasteBtn    = document.getElementById('paste-btn');
+  const filenamePill= document.getElementById('filename');
+  const contentWrap = document.getElementById('content-wrap');
+
+  // Configure marked
+  marked.setOptions({
+    gfm: true,
+    breaks: false,
+    highlight: (code, lang) => {
+      if (lang && hljs.getLanguage(lang)) {
+        return hljs.highlight(code, { language: lang }).value;
+      }
+      return hljs.highlightAuto(code).value;
+    }
+  });
+
+  // Renderer tweak: add IDs to headings
+  const renderer = new marked.Renderer();
+  renderer.heading = (text, level) => {
+    const id = text.toLowerCase().replace(/[^\w]+/g, '-').replace(/^-|-$/g,'');
+    return `<h${level} id="${id}">${text}</h${level}>`;
+  };
+  marked.use({ renderer });
+
+  function render(markdown, filename, restoreScroll) {
+    const html = marked.parse(markdown);
+    mdOutput.innerHTML = html;
+    mdOutput.classList.add('visible');
+    landing.style.display = 'none';
+    buildTOC();
+    if (filename) {
+      filenamePill.textContent = filename;
+      filenamePill.classList.add('visible');
+      dropZone.classList.add('has-file');
+      dropZone.textContent = 'Open another file…';
+    }
+    contentWrap.scrollTop = restoreScroll || 0;
+    scheduleRender();
+    // Persist document
+    try {
+      const saved = { filename: filename || '', markdown, scrollTop: restoreScroll || 0 };
+      localStorage.setItem('mdr_doc', JSON.stringify(saved));
+    } catch(e) {}
+  }
+
+  function buildTOC() {
+    tocList.innerHTML = '';
+    const headings = mdOutput.querySelectorAll('h1,h2,h3,h4');
+    if (headings.length < 2) {
+      tocPanel.classList.remove('visible');
+      tocToggle.classList.remove('active');
+      return;
+    }
+    headings.forEach(h => {
+      const li = document.createElement('li');
+      li.className = h.tagName.toLowerCase();
+      const a = document.createElement('a');
+      a.href = '#' + h.id;
+      a.textContent = h.textContent;
+      a.addEventListener('click', e => {
+        e.preventDefault();
+        const rect = h.getBoundingClientRect();
+        const wrapRect = contentWrap.getBoundingClientRect();
+        contentWrap.scrollTop += rect.top - wrapRect.top;
+      });
+      li.appendChild(a);
+      tocList.appendChild(li);
+    });
+  }
+
+  // Active TOC highlight on scroll
+  contentWrap.addEventListener('scroll', () => {
+    const headings = [...mdOutput.querySelectorAll('h1,h2,h3,h4')];
+    const links    = [...tocList.querySelectorAll('a')];
+    let active = null;
+    for (const h of headings) {
+      if (h.getBoundingClientRect().top < 120) active = h.id;
+    }
+    links.forEach(a => {
+      const isActive = a.getAttribute('href') === '#' + active;
+      a.classList.toggle('active', isActive);
+    });
+  });
+
+  // File input
+  fileInput.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (file) readFile(file);
+  });
+
+  function readFile(file) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      // Look up saved scroll position for this filename from recent entries
+      const recent = getRecent();
+      const entry  = recent.find(r => r.filename === file.name);
+      const savedScroll = entry ? (entry.scrollTop || 0) : 0;
+      render(ev.target.result, file.name, savedScroll);
+      if (savedScroll) setTimeout(() => { contentWrap.scrollTop = savedScroll; updateViewport(); }, 80);
+    };
+    reader.readAsText(file);
+  }
+
+  // Drag-and-drop onto drop zone
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) readFile(file);
+  });
+
+  // Full-window drop
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', e => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) readFile(file);
+  });
+
+  // TOC toggle
+  tocToggle.addEventListener('click', () => {
+    const on = tocPanel.classList.toggle('visible');
+    tocToggle.classList.toggle('active', on);
+    saveSettings();
+  });
+
+  // Paste button
+  pasteBtn.addEventListener('click', async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text.trim()) {
+        render(text, null);
+        filenamePill.classList.remove('visible');
+        dropZone.classList.remove('has-file');
+        dropZone.textContent = 'Open another file…';
+      }
+    } catch {
+      const t = prompt('Paste your markdown here:');
+      if (t) render(t, null);
+    }
+  });
+
+  // Text width / margin controls
+  const article = document.querySelector('article');
+  let maxWidth = 720;
+  const WIDTH_MIN = 400, WIDTH_MAX = 1400, WIDTH_STEP = 80;
+
+  function applyWidth() {
+    article.style.maxWidth = maxWidth + 'px';
+    saveSettings();
+  }
+
+  document.getElementById('width-up-btn').addEventListener('click', () => {
+    if (maxWidth < WIDTH_MAX) { maxWidth += WIDTH_STEP; applyWidth(); }
+  });
+  document.getElementById('width-down-btn').addEventListener('click', () => {
+    if (maxWidth > WIDTH_MIN) { maxWidth -= WIDTH_STEP; applyWidth(); }
+  });
+
+  // Font size / line-height controls
+  let fontSize   = 17;   // px
+  let lineHeight = 1.75;
+  const FONT_MIN = 12, FONT_MAX = 28, FONT_STEP = 1;
+  const LH_STEP  = 0.1;
+
+  function applyTypography() {
+    mdOutput.style.fontSize   = fontSize + 'px';
+    mdOutput.style.lineHeight = lineHeight.toFixed(2);
+    saveSettings();
+  }
+
+  document.getElementById('font-up-btn').addEventListener('click', () => {
+    if (fontSize < FONT_MAX) { fontSize += FONT_STEP; lineHeight = Math.min(2.2, lineHeight + LH_STEP); applyTypography(); }
+  });
+  document.getElementById('font-down-btn').addEventListener('click', () => {
+    if (fontSize > FONT_MIN) { fontSize -= FONT_STEP; lineHeight = Math.max(1.3, lineHeight - LH_STEP); applyTypography(); }
+  });
+
+  // Page up / page down buttons
+  const pageAmount = () => contentWrap.clientHeight * 0.95;
+  document.getElementById('pgup-btn').addEventListener('click', () => {
+    contentWrap.scrollBy({ top: -pageAmount(), behavior: 'smooth' });
+  });
+  document.getElementById('pgdn-btn').addEventListener('click', () => {
+    contentWrap.scrollBy({ top: pageAmount(), behavior: 'smooth' });
+  });
+
+  // ── Document Map ──
+  const docMap       = document.getElementById('doc-map');
+  const mapCanvas    = document.getElementById('doc-map-canvas');
+  const mapViewport  = document.getElementById('doc-map-viewport');
+  const mapCtx       = mapCanvas.getContext('2d');
+
+  // Scale factor: how many px of document content per px of map height
+  let mapScale = 1;
+  let renderTimer = null;
+
+  function renderMap() {
+    const mapW   = docMap.clientWidth;
+    const mapH   = docMap.clientHeight;
+    const srcW   = contentWrap.scrollWidth;
+    const srcH   = contentWrap.scrollHeight;
+    if (!mapW || !mapH || !srcH) return;
+
+    mapScale = srcH / mapH;
+
+    // Canvas resolution
+    const dpr = window.devicePixelRatio || 1;
+    mapCanvas.width  = mapW * dpr;
+    mapCanvas.height = mapH * dpr;
+    mapCanvas.style.width  = mapW + 'px';
+    mapCanvas.style.height = mapH + 'px';
+    mapCtx.scale(dpr, dpr);
+
+    // Background
+    mapCtx.fillStyle = '#0a0d12';
+    mapCtx.fillRect(0, 0, mapW, mapH);
+
+    // Scale down to fit full document height into panel height
+    const scaleX = mapW / srcW;
+    const scaleY = mapH / srcH;
+
+    // Walk rendered elements and draw simplified shapes
+    const elements = mdOutput.querySelectorAll('h1,h2,h3,h4,p,pre,blockquote,ul,ol,table,hr');
+    elements.forEach(el => {
+      const r = el.getBoundingClientRect();
+      const wrapR = contentWrap.getBoundingClientRect();
+      // position relative to scrollable content
+      const top    = r.top - wrapR.top + contentWrap.scrollTop;
+      const left   = r.left - wrapR.left;
+      const w      = r.width;
+      const h      = r.height;
+
+      const x = left * scaleX;
+      const y = top  * scaleY;
+      const sw = w   * scaleX;
+      const sh = Math.max(1, h * scaleY);
+
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'h1') {
+        mapCtx.fillStyle = '#f0f6fc';
+        mapCtx.fillRect(x, y, sw, Math.max(2, sh));
+      } else if (tag === 'h2') {
+        mapCtx.fillStyle = '#c9d1d9';
+        mapCtx.fillRect(x, y, sw * 0.85, Math.max(1.5, sh));
+      } else if (tag === 'h3' || tag === 'h4') {
+        mapCtx.fillStyle = '#8b949e';
+        mapCtx.fillRect(x, y, sw * 0.7, Math.max(1, sh));
+      } else if (tag === 'pre') {
+        mapCtx.fillStyle = '#1f2937';
+        mapCtx.fillRect(x, y, sw, sh);
+        mapCtx.fillStyle = '#3fb950';
+        mapCtx.fillRect(x, y, sw, Math.min(1.5, sh));
+      } else if (tag === 'blockquote') {
+        mapCtx.fillStyle = 'rgba(88,166,255,0.25)';
+        mapCtx.fillRect(x, y, sw, sh);
+        mapCtx.fillStyle = '#58a6ff';
+        mapCtx.fillRect(x, y, 2, sh);
+      } else if (tag === 'hr') {
+        mapCtx.fillStyle = '#21262d';
+        mapCtx.fillRect(x, y, sw, 1);
+      } else if (tag === 'table') {
+        mapCtx.fillStyle = 'rgba(255,255,255,0.06)';
+        mapCtx.fillRect(x, y, sw, sh);
+      } else {
+        // p, li items — draw text lines as faint bars
+        const lineH = Math.max(1, 2 * scaleY);
+        const lineGap = Math.max(2, 8 * scaleY);
+        mapCtx.fillStyle = 'rgba(230,237,243,0.25)';
+        let ly = y;
+        while (ly < y + sh - lineH) {
+          // vary line width slightly for realism
+          const lw = sw * (0.7 + 0.3 * Math.sin(ly * 7.3));
+          mapCtx.fillRect(x, ly, lw, lineH);
+          ly += lineGap;
+        }
+      }
+    });
+
+    updateViewport();
+  }
+
+  function updateViewport() {
+    const mapH     = docMap.clientHeight;
+    const srcH     = contentWrap.scrollHeight;
+    const visH     = contentWrap.clientHeight;
+    const scrolled = contentWrap.scrollTop;
+    if (!srcH) return;
+
+    const vpTop = (scrolled / srcH) * mapH;
+    const vpH   = Math.max(20, (visH / srcH) * mapH);
+    mapViewport.style.top    = vpTop + 'px';
+    mapViewport.style.height = vpH + 'px';
+  }
+
+  function scheduleRender() {
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(renderMap, 120);
+  }
+
+  contentWrap.addEventListener('scroll', () => {
+    updateViewport();
+    try {
+      const saved = JSON.parse(localStorage.getItem('mdr_doc') || 'null');
+      if (saved) {
+        saved.scrollTop = contentWrap.scrollTop;
+        localStorage.setItem('mdr_doc', JSON.stringify(saved));
+        if (saved.filename) updateRecentScroll(saved.filename, contentWrap.scrollTop);
+      }
+    } catch(e) {}
+  });
+  window.addEventListener('resize', scheduleRender);
+
+  // Click / drag on map to navigate
+  function mapYToScroll(clientY) {
+    const rect = docMap.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    contentWrap.scrollTop = frac * (contentWrap.scrollHeight - contentWrap.clientHeight);
+  }
+
+  let mapDragging = false;
+  docMap.addEventListener('mousedown', e => {
+    e.preventDefault();
+    mapDragging = true;
+    mapYToScroll(e.clientY);
+    docMap.style.cursor = 'grabbing';
+  });
+  document.addEventListener('mousemove', e => {
+    if (!mapDragging) return;
+    mapYToScroll(e.clientY);
+  });
+  document.addEventListener('mouseup', () => {
+    if (mapDragging) { mapDragging = false; docMap.style.cursor = 'pointer'; }
+  });
+
+  // ── Persistence (localStorage) ──
+  const STORAGE_KEY_SETTINGS = 'mdr_settings';
+  const STORAGE_KEY_DOC      = 'mdr_doc';
+
+  // ── Colour pickers ──
+  const bgPicker  = document.getElementById('bg-picker');
+  const fgPicker  = document.getElementById('fg-picker');
+  const bgPreview = document.getElementById('bg-preview');
+  const fgPreview = document.getElementById('fg-preview');
+  const flipBtn   = document.getElementById('flip-colors');
+
+  let bgColor = '#0f1117';
+  let fgColor = '#e6edf3';
+
+  function applyColors() {
+    document.documentElement.style.setProperty('--bg',      bgColor);
+    document.documentElement.style.setProperty('--surface', adjustBrightness(bgColor, 8));
+    document.documentElement.style.setProperty('--border',  adjustBrightness(bgColor, 16));
+    document.documentElement.style.setProperty('--text',    fgColor);
+    document.documentElement.style.setProperty('--heading', fgColor);
+    bgPicker.value  = bgColor;
+    fgPicker.value  = fgColor;
+    bgPreview.style.background = bgColor;
+    fgPreview.style.background = fgColor;
+  }
+
+  function adjustBrightness(hex, amount) {
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    const clamp = v => Math.min(255, Math.max(0, v));
+    // If dark bg, lighten; if light bg, darken
+    const luma = 0.299*r + 0.587*g + 0.114*b;
+    const delta = luma < 128 ? amount : -amount;
+    return '#' + [r,g,b].map(v => clamp(v+delta).toString(16).padStart(2,'0')).join('');
+  }
+
+  bgPicker.addEventListener('input', () => { bgColor = bgPicker.value; applyColors(); saveSettings(); });
+  fgPicker.addEventListener('input', () => { fgColor = fgPicker.value; applyColors(); saveSettings(); });
+  let flipLastClick = 0;
+  flipBtn.addEventListener('click', () => {
+    const now = Date.now();
+    if (now - flipLastClick < 300) {
+      bgColor = '#0f1117'; fgColor = '#e6edf3';
+    } else {
+      [bgColor, fgColor] = [fgColor, bgColor];
+    }
+    flipLastClick = now;
+    applyColors(); saveSettings();
+  });
+
+  // Initialise swatches
+  bgPreview.style.background = bgColor;
+  fgPreview.style.background = fgColor;
+
+  // ── Font selector ──
+  const fontSelect = document.getElementById('font-select');
+  const FONT_MAP = {
+    'serif-charter':  "'Charter', 'Georgia', 'Cambria', serif",
+    'serif-georgia':  "'Georgia', 'Cambria', serif",
+    'serif-palatino': "'Palatino Linotype', 'Palatino', 'Book Antiqua', serif",
+    'sans-ibmplex':   "'IBM Plex Sans', system-ui, sans-serif",
+    'sans-inter':     "'Inter', system-ui, sans-serif",
+    'sans-system':    "system-ui, -apple-system, sans-serif",
+    'mono-jetbrains': "'JetBrains Mono', 'Fira Code', monospace",
+    'mono-firacode':  "'Fira Code', 'Cascadia Code', monospace",
+    'mono-courier':   "'Courier New', Courier, monospace",
+  };
+  let currentFont = 'serif-charter';
+
+  function applyFont(key) {
+    currentFont = key;
+    const stack = FONT_MAP[key] || FONT_MAP['serif-charter'];
+    document.documentElement.style.setProperty('--font-body', stack);
+    fontSelect.value = key;
+  }
+
+  fontSelect.addEventListener('change', () => { applyFont(fontSelect.value); saveSettings(); });
+
+  function saveSettings() {
+    try {
+      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify({ fontSize, lineHeight, maxWidth, bgColor, fgColor, font: currentFont, tocOpen: tocPanel.classList.contains('visible') }));
+    } catch(e) {}
+  }
+
+  function loadSettings() {
+    try {
+      const s = JSON.parse(localStorage.getItem(STORAGE_KEY_SETTINGS) || 'null');
+      if (!s) return;
+      if (s.fontSize)   { fontSize   = s.fontSize;   }
+      if (s.lineHeight) { lineHeight = s.lineHeight; }
+      if (s.maxWidth)   { maxWidth   = s.maxWidth;   }
+      if (s.bgColor)    { bgColor    = s.bgColor;    }
+      if (s.fgColor)    { fgColor    = s.fgColor;    }
+      mdOutput.style.fontSize   = fontSize + 'px';
+      mdOutput.style.lineHeight = lineHeight.toFixed(2);
+      article.style.maxWidth    = maxWidth + 'px';
+      applyColors();
+      if (s.font) applyFont(s.font);
+      if (s.tocOpen) { tocPanel.classList.add('visible'); tocToggle.classList.add('active'); }
+    } catch(e) {}
+  }
+
+  function loadLastDoc() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_DOC) || 'null');
+      if (!saved || !saved.markdown) return;
+      render(saved.markdown, saved.filename || null, saved.scrollTop || 0);
+      // Restore exact scroll after layout settles
+      setTimeout(() => { contentWrap.scrollTop = saved.scrollTop || 0; updateViewport(); }, 80);
+    } catch(e) {}
+  }
+
+  // Bootstrap on page load
+  loadSettings();
+  loadLastDoc();
+
+  // Chrome + file:// localStorage detection
+  (function() {
+    const isChrome = /Chrome\//.test(navigator.userAgent) && !/Edg\/|OPR\/|Brave\//.test(navigator.userAgent);
+    const isFileProtocol = location.protocol === 'file:';
+    if (!isChrome || !isFileProtocol) return;
+    // Try a test write to detect if storage is actually blocked
+    let blocked = false;
+    try {
+      localStorage.setItem('_mdr_test', '1');
+      localStorage.removeItem('_mdr_test');
+    } catch(e) {
+      blocked = true;
+    }
+    if (!blocked) return; // Flag is already set, all good
+    const banner = document.getElementById('chrome-warn');
+    banner.classList.add('visible');
+    document.getElementById('chrome-warn-close').addEventListener('click', () => {
+      banner.classList.remove('visible');
+    });
+  })();
+
+  // ── Recent files ──
+  const RECENT_KEY  = 'mdr_recent';
+  const MAX_RECENT  = 12;
+  const logoBtn     = document.getElementById('logo-btn');
+  const recentDD    = document.getElementById('recent-dropdown');
+  const recentList  = document.getElementById('recent-list');
+  const recentClear = document.getElementById('recent-clear');
+
+  function getRecent() {
+    try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch(e) { return []; }
+  }
+  function saveRecent(arr) {
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(arr)); } catch(e) {}
+  }
+  function addRecent(filename, markdown, scrollTop) {
+    if (!filename) return;
+    let arr = getRecent().filter(r => r.filename !== filename);
+    arr.unshift({ filename, snippet: markdown.slice(0, 200), scrollTop: scrollTop || 0 });
+    if (arr.length > MAX_RECENT) arr = arr.slice(0, MAX_RECENT);
+    saveRecent(arr);
+  }
+  function updateRecentScroll(filename, scrollTop) {
+    let arr = getRecent();
+    const idx = arr.findIndex(r => r.filename === filename);
+    if (idx >= 0) { arr[idx].scrollTop = scrollTop; saveRecent(arr); }
+  }
+  function renderRecentList() {
+    const arr = getRecent();
+    recentList.innerHTML = '';
+    if (!arr.length) {
+      recentList.innerHTML = '<div class="recent-empty">No recent files</div>';
+      return;
+    }
+    arr.forEach(r => {
+      const btn = document.createElement('button');
+      btn.className = 'recent-item';
+      btn.textContent = r.filename;
+      btn.title = r.filename;
+      btn.addEventListener('click', () => {
+        recentDD.classList.remove('open');
+        // Copy filename to clipboard so user can paste into file picker
+        try {
+          navigator.clipboard.writeText(r.filename).then(() => showToast('📋 Copied: ' + r.filename));
+        } catch(e) {
+          // Fallback
+          const ta = document.createElement('textarea');
+          ta.value = r.filename; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select();
+          try { document.execCommand('copy'); showToast('📋 Copied: ' + r.filename); } catch(e2) {}
+          document.body.removeChild(ta);
+        }
+      });
+      recentList.appendChild(btn);
+    });
+  }
+
+  logoBtn.addEventListener('mouseenter', () => { renderRecentList(); recentDD.classList.add('open'); });
+  logoBtn.addEventListener('mouseleave', () => recentDD.classList.remove('open'));
+  recentDD.addEventListener('mouseenter', () => recentDD.classList.add('open'));
+  recentDD.addEventListener('mouseleave', () => recentDD.classList.remove('open'));
+  recentClear.addEventListener('click', () => { saveRecent([]); recentDD.classList.remove('open'); });
+
+  // Hook into render to track recent files
+  const _renderOrig = render;
+  render = function(markdown, filename, restoreScroll) {
+    _renderOrig(markdown, filename, restoreScroll);
+    if (filename) addRecent(filename, markdown, restoreScroll || 0);
+    timerReset();
+  };
+
+  // ── Reading timer ──
+  const timerEl = document.getElementById('reading-timer');
+  let timerSeconds = 0;
+  let timerRunning = false;
+  let timerInterval = null;
+
+  function timerFmt(s) {
+    const h = String(Math.floor(s / 3600)).padStart(2,'0');
+    const m = String(Math.floor((s % 3600) / 60)).padStart(2,'0');
+    const sec = String(s % 60).padStart(2,'0');
+    return h + ':' + m + ':' + sec;
+  }
+  function timerStart() {
+    if (timerRunning) return;
+    timerRunning = true;
+    timerEl.classList.remove('paused');
+    timerInterval = setInterval(() => { timerSeconds++; timerEl.textContent = timerFmt(timerSeconds); }, 1000);
+  }
+  function timerPause() {
+    if (!timerRunning) return;
+    timerRunning = false;
+    timerEl.classList.add('paused');
+    clearInterval(timerInterval);
+  }
+  function timerReset() {
+    clearInterval(timerInterval);
+    timerSeconds  = 0;
+    timerRunning  = false;
+    timerEl.classList.remove('paused');
+    timerEl.textContent = '00:00:00';
+    timerStart();
+  }
+  function timerToggle() {
+    timerRunning ? timerPause() : timerStart();
+  }
+
+  let timerClickTimer = null;
+  timerEl.addEventListener('click', () => {
+    if (timerClickTimer) {
+      // double-click
+      clearTimeout(timerClickTimer);
+      timerClickTimer = null;
+      timerReset();
+    } else {
+      timerClickTimer = setTimeout(() => {
+        timerClickTimer = null;
+        timerToggle();
+      }, 250);
+    }
+  });
+
+  // ── Toast notification ──
+  let toastTimer = null;
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  // Keyboard shortcut: Ctrl/Cmd+O
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'o') {
+      e.preventDefault();
+      fileInput.click();
+    }
+    if (e.key === 'PageDown') { e.preventDefault(); contentWrap.scrollBy({ top:  pageAmount(), behavior: 'smooth' }); }
+    if (e.key === 'PageUp')   { e.preventDefault(); contentWrap.scrollBy({ top: -pageAmount(), behavior: 'smooth' }); }
+    if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); document.getElementById('font-up-btn').click(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); document.getElementById('font-down-btn').click(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowRight') { e.preventDefault(); document.getElementById('width-up-btn').click(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowLeft')  { e.preventDefault(); document.getElementById('width-down-btn').click(); }
+  });
+</script>
+</body>
+</html>
