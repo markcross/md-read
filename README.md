@@ -1,5 +1,5 @@
 # md·read — Local Markdown Reader
-https://github.com/markcross/md-read
+[https://github.com/markcross/md-read](https://github.com/markcross/md-read/blob/main/markdown-reader.html)
 
 A single self-contained HTML file for reading Markdown documents locally in any browser. No installation, no server, no dependencies beyond a CDN connection on first load.
 
